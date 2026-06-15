@@ -73,7 +73,7 @@
   .tabs button.on .n{color:var(--accent)}
 
   /* columns */
-  .board{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;align-items:start}
+  .board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px;align-items:start}
   .col{background:transparent}
   .colhead{display:flex;align-items:baseline;gap:10px;padding:0 4px 12px;border-bottom:1px solid var(--line);margin-bottom:14px}
   .colhead .num{font-family:var(--mono);font-weight:700;font-size:13px;color:var(--accent);letter-spacing:1px}
@@ -84,7 +84,7 @@
   .item{
     background:var(--card);border:1px solid var(--line);border-radius:var(--r);
     padding:12px 12px 12px 13px;display:flex;align-items:flex-start;gap:10px;
-    will-change:transform;
+    min-width:0;will-change:transform;
   }
   .check{
     flex-shrink:0;width:19px;height:19px;border:1.8px solid var(--done);border-radius:50%;
@@ -104,16 +104,25 @@
   .acts button:hover{background:var(--accent-soft);color:var(--accent)}
   .acts button.del:hover{background:#fbeae8;color:var(--danger)}
 
-  /* link card */
-  .lbody{flex:1;min-width:0;cursor:pointer}
-  .lhead{display:flex;align-items:center;gap:7px;margin-bottom:2px}
+  /* link card (compact, single line) */
+  .item.link{align-items:center}
+  .lbody{flex:1;min-width:0;cursor:pointer;display:flex;align-items:center;gap:7px;text-decoration:none;color:inherit}
   .src{flex-shrink:0;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--accent);background:var(--accent-soft);padding:1px 7px;border-radius:20px;letter-spacing:.3px}
-  .ltitle{font-size:14.5px;line-height:1.4;word-break:break-word}
+  .ltitle{flex:1;min-width:0;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ltitle.loading{color:var(--muted);font-style:italic}
-  .lurl{font-size:11.5px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .item.done .ltitle{color:var(--done);text-decoration:line-through}
   .lbody:hover .ltitle{color:var(--accent)}
   .item.done .lbody:hover .ltitle{color:var(--done)}
+  /* collapsible link group */
+  .linkgroup{margin-top:9px}
+  .lghead{display:flex;align-items:center;gap:8px;padding:10px 13px;border:1px dashed var(--line);border-radius:var(--r);cursor:pointer;font-size:13px;color:var(--muted);user-select:none}
+  .lghead:hover{border-color:var(--accent);color:var(--accent)}
+  .lghead .arw{font-family:var(--mono);font-size:15px;transition:transform .2s;display:inline-block}
+  .linkgroup.open .lghead{border-style:solid}
+  .linkgroup.open .lghead .arw{transform:rotate(90deg)}
+  .lghead .lgcount{margin-left:auto;font-family:var(--mono);font-weight:600}
+  .lgbody{display:none;flex-direction:column;gap:9px;margin-top:9px}
+  .linkgroup.open .lgbody{display:flex}
 
   .empty{color:var(--done);font-size:13px;padding:14px 4px;text-align:center;border:1px dashed var(--line);border-radius:var(--r)}
   .colfoot{margin-top:12px}
@@ -147,7 +156,7 @@
   @media(max-width:720px){
     .wrap{padding:20px 16px 120px}
     .tabs{display:flex}
-    .board{grid-template-columns:1fr;gap:0}
+    .board{grid-template-columns:minmax(0,1fr);gap:0}
     .col{display:none}.col.active{display:block}
     .colhead{display:none}
     .add{position:fixed;bottom:0;left:0;right:0;margin:0;padding:12px 16px calc(12px + env(safe-area-inset-bottom));background:var(--paper);border-top:1px solid var(--line);z-index:40}
@@ -210,6 +219,7 @@ const PREV={today:'week',week:'inbox'};
 const NAME={inbox:'收集箱',week:'本周',today:'今日'};
 let tasks=[];
 let cfg={key:'',bin:''};
+let ui={};
 let curTab='inbox';
 let saveTimer=null;
 
@@ -217,10 +227,14 @@ let saveTimer=null;
 function loadLocal(){
   try{tasks=JSON.parse(localStorage.getItem('flow_tasks')||'[]')}catch(e){tasks=[]}
   try{cfg=JSON.parse(localStorage.getItem('flow_cfg')||'{}')||{}}catch(e){cfg={}}
+  try{ui=JSON.parse(localStorage.getItem('flow_ui')||'{}')||{}}catch(e){ui={}}
   cfg.key=cfg.key||'';cfg.bin=cfg.bin||'';
 }
-function saveLocal(){localStorage.setItem('flow_tasks',JSON.stringify(tasks))}
-function saveCfg(){localStorage.setItem('flow_cfg',JSON.stringify(cfg))}
+function saveUI(){try{localStorage.setItem('flow_ui',JSON.stringify(ui))}catch(e){}}
+function saveLocal(){try{localStorage.setItem('flow_tasks',JSON.stringify(tasks))}catch(e){warnStorage()}}
+function saveCfg(){try{localStorage.setItem('flow_cfg',JSON.stringify(cfg))}catch(e){warnStorage()}}
+let _warned=false;
+function warnStorage(){if(_warned)return;_warned=true;setTimeout(()=>toast('此环境无法本地保存，请用 Safari/Chrome 正常打开（避免无痕或微信内置浏览器）'),300)}
 
 /* ---------- cloud (JSONBin) ---------- */
 function setDot(state,label){
@@ -291,13 +305,11 @@ function itemHTML(t){
     const loading=t.title===undefined;
     const failed=t.title==='';
     const main=loading?'读取标题中…':(failed?t.url:t.title);
-    const sub=failed?'':`<div class="lurl">${esc(t.url)}</div>`;
     return `<div class="item link${t.done?' done':''}" data-id="${t.id}">
       <div class="check" data-act="done"></div>
-      <div class="lbody" data-act="open">
-        <div class="lhead"><span class="src">${esc(t.src||'链接')}</span><span class="ltitle${loading?' loading':''}">${esc(main)}</span></div>
-        ${sub}
-      </div>
+      <a class="lbody" href="${esc(t.url)}" target="_blank" rel="noopener">
+        <span class="src">${esc(t.src||'链接')}</span><span class="ltitle${loading?' loading':''}">${esc(main)}</span>
+      </a>
       <div class="acts">${acts}</div>
     </div>`;
   }
@@ -310,12 +322,18 @@ function itemHTML(t){
 function render(){
   const board=document.getElementById('board');
   board.innerHTML=LISTS.map(([id,num,title])=>{
-    const items=tasks.filter(t=>t.list===id);
-    document.getElementById('t-'+id).textContent=items.length;
-    const body=items.length?items.map(itemHTML).join(''):`<div class="empty">空</div>`;
+    const its=tasks.filter(t=>t.list===id);
+    document.getElementById('t-'+id).textContent=its.length;
+    const todos=its.filter(t=>t.type!=='link'),links=its.filter(t=>t.type==='link');
+    let body=todos.map(itemHTML).join('');
+    if(links.length){
+      const open=ui['lg_'+id]?' open':'';
+      body+=`<div class="linkgroup${open}" data-lg="${id}"><div class="lghead"><span class="arw">›</span>稍后读<span class="lgcount">${links.length}</span></div><div class="lgbody">${links.map(itemHTML).join('')}</div></div>`;
+    }
+    if(!its.length)body=`<div class="empty">空</div>`;
     const foot=id==='today'?`<div class="colfoot"><button class="clear" data-clear>收工 · 清理今日已完成</button></div>`:'';
     return `<section class="col${curTab===id?' active':''}" data-col="${id}">
-      <div class="colhead"><span class="num">${num}</span><h2>${title}</h2><span class="cnt">${items.length}</span></div>
+      <div class="colhead"><span class="num">${num}</span><h2>${title}</h2><span class="cnt">${its.length}</span></div>
       <div class="list">${body}</div>${foot}
     </section>`;
   }).join('');
@@ -361,6 +379,8 @@ document.getElementById('board').addEventListener('click',e=>{
   if(e.target.matches('[data-clear]')){
     tasks=tasks.filter(t=>!(t.list==='today'&&t.done));flip();scheduleSave();return;
   }
+  const lgh=e.target.closest('.lghead');
+  if(lgh){const g=lgh.parentElement,id=g.dataset.lg;ui['lg_'+id]=!ui['lg_'+id];saveUI();g.classList.toggle('open');return}
   const el=e.target.closest('.item');if(!el)return;
   const t=find(el.dataset.id);if(!t)return;
   const act=e.target.dataset.act;
@@ -403,14 +423,13 @@ document.getElementById('s-save').onclick=async()=>{
   cfg.key=document.getElementById('f-key').value.trim();
   cfg.bin=document.getElementById('f-bin').value.trim();
   if(!cfg.key){toast('请填 Master Key');return}
+  saveCfg();
   setDot('busy','同步中');
   try{
-    if(!cfg.bin){cfg.bin=await createBin();}
-    saveCfg();
+    if(!cfg.bin){cfg.bin=await createBin();saveCfg()}
     await pull();
-    if(!tasks.length===false)await push();
     setDot('ok','已同步');closeSheet();toast('同步已开启');
-  }catch(e){setDot('off','离线');toast('连接失败，检查 Key / Bin ID')}
+  }catch(e){setDot('off','离线');toast('设置已存，但连接失败，检查网络或 Key / Bin ID')}
 };
 
 /* init */
