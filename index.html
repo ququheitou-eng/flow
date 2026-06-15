@@ -104,6 +104,17 @@
   .acts button:hover{background:var(--accent-soft);color:var(--accent)}
   .acts button.del:hover{background:#fbeae8;color:var(--danger)}
 
+  /* link card */
+  .lbody{flex:1;min-width:0;cursor:pointer}
+  .lhead{display:flex;align-items:center;gap:7px;margin-bottom:2px}
+  .src{flex-shrink:0;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--accent);background:var(--accent-soft);padding:1px 7px;border-radius:20px;letter-spacing:.3px}
+  .ltitle{font-size:14.5px;line-height:1.4;word-break:break-word}
+  .ltitle.loading{color:var(--muted);font-style:italic}
+  .lurl{font-size:11.5px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .item.done .ltitle{color:var(--done);text-decoration:line-through}
+  .lbody:hover .ltitle{color:var(--accent)}
+  .item.done .lbody:hover .ltitle{color:var(--done)}
+
   .empty{color:var(--done);font-size:13px;padding:14px 4px;text-align:center;border:1px dashed var(--line);border-radius:var(--r)}
   .colfoot{margin-top:12px}
   .clear{width:100%;border:1px solid var(--line);background:none;color:var(--muted);border-radius:10px;padding:9px;font-size:13px;cursor:pointer;font-family:var(--sans)}
@@ -158,7 +169,7 @@
   </div>
 
   <div class="add">
-    <input id="qadd" placeholder="想到什么，丢进收集箱…" autocomplete="off">
+    <input id="qadd" placeholder="想到什么，或粘个链接稍后读…" autocomplete="off">
     <button id="qbtn">收集</button>
   </div>
 
@@ -276,6 +287,20 @@ function itemHTML(t){
   if(PREV[t.list])acts+=`<button data-act="prev" title="退回${NAME[PREV[t.list]]}">‹</button>`;
   if(NEXT[t.list])acts+=`<button data-act="next" title="推进到${NAME[NEXT[t.list]]}">›</button>`;
   acts+=`<button class="del" data-act="del" title="删除">×</button>`;
+  if(t.type==='link'){
+    const loading=t.title===undefined;
+    const failed=t.title==='';
+    const main=loading?'读取标题中…':(failed?t.url:t.title);
+    const sub=failed?'':`<div class="lurl">${esc(t.url)}</div>`;
+    return `<div class="item link${t.done?' done':''}" data-id="${t.id}">
+      <div class="check" data-act="done"></div>
+      <div class="lbody" data-act="open">
+        <div class="lhead"><span class="src">${esc(t.src||'链接')}</span><span class="ltitle${loading?' loading':''}">${esc(main)}</span></div>
+        ${sub}
+      </div>
+      <div class="acts">${acts}</div>
+    </div>`;
+  }
   return `<div class="item${t.done?' done':''}" data-id="${t.id}">
     <div class="check" data-act="done"></div>
     <div class="txt" data-act="edit">${esc(t.text)}</div>
@@ -298,10 +323,36 @@ function render(){
 function esc(s){return s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 
 /* ---------- actions ---------- */
+const SRC={'xiaoyuzhoufm.com':'小宇宙','mp.weixin.qq.com':'公众号','bilibili.com':'B站','b23.tv':'B站','zhihu.com':'知乎','youtube.com':'YouTube','youtu.be':'YouTube','twitter.com':'X','x.com':'X','github.com':'GitHub','douban.com':'豆瓣','xiaohongshu.com':'小红书','xhslink.com':'小红书','okjike.com':'即刻','jike.city':'即刻','sspai.com':'少数派','notion.so':'Notion','feishu.cn':'飞书','bjp.org.cn':'链接'};
+function sourceName(url){
+  try{
+    const h=new URL(url).hostname.replace(/^www\./,'');
+    for(const k in SRC){if(h===k||h.endsWith('.'+k))return SRC[k]}
+    return h;
+  }catch(e){return '链接'}
+}
+async function hydrate(id){
+  const t=find(id);if(!t||t.type!=='link')return;
+  try{
+    const r=await fetch('https://api.microlink.io/?url='+encodeURIComponent(t.url));
+    const j=await r.json();
+    t.title=(j&&j.status==='success'&&j.data&&j.data.title)?j.data.title:'';
+  }catch(e){t.title=''}
+  render();scheduleSave();
+}
 function add(text){
   text=text.trim();if(!text)return;
-  tasks.unshift({id:Date.now()+''+Math.random().toString(36).slice(2,6),text,list:'inbox',done:false});
-  render();scheduleSave();
+  const base={id:Date.now()+''+Math.random().toString(36).slice(2,6),list:'inbox',done:false};
+  const m=text.match(/https?:\/\/[^\s]+/);
+  if(m){
+    const url=m[0],rest=text.replace(url,'').trim();
+    const item={...base,type:'link',url,src:sourceName(url)};
+    if(rest)item.title=rest;
+    tasks.unshift(item);render();scheduleSave();
+    if(!rest)hydrate(item.id);
+  }else{
+    tasks.unshift({...base,type:'task',text});render();scheduleSave();
+  }
 }
 function find(id){return tasks.find(t=>t.id===id)}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),1600)}
@@ -314,6 +365,7 @@ document.getElementById('board').addEventListener('click',e=>{
   const t=find(el.dataset.id);if(!t)return;
   const act=e.target.dataset.act;
   if(act==='done'){t.done=!t.done;render();scheduleSave()}
+  else if(act==='open'){if(t.url)window.open(t.url,'_blank','noopener')}
   else if(act==='next'){t.list=NEXT[t.list];flip();scheduleSave();if(innerWidth<=720)toast('已推进到 '+NAME[t.list])}
   else if(act==='prev'){t.list=PREV[t.list];flip();scheduleSave();if(innerWidth<=720)toast('已退回 '+NAME[t.list])}
   else if(act==='del'){tasks=tasks.filter(x=>x.id!==t.id);flip();scheduleSave()}
